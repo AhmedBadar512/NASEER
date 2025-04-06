@@ -1,82 +1,37 @@
-#!/usr/bin/env python3
-
-"""
-Sample script to download common NLP benchmarks using Hugging Face datasets.
-Make sure to install the datasets library first:
-
-    pip install datasets
-
-Then, you can run this script:
-
-    python download_datasets.py
-
-It will download and save each dataset to a local directory.
-"""
-
 import os
 from datasets import load_dataset
 
-def download_glue_tasks(save_dir="glue_data", tasks=None):
-    """
-    Download specified tasks from the GLUE benchmark.
-    If tasks is None, downloads the entire GLUE suite.
-    """
-    if tasks is None:
-        tasks = [
-            "sst2", "mnli", "qqp", "qnli", "rte",
-            "mrpc", "cola", "stsb", "wnli"
-        ]
-    os.makedirs(save_dir, exist_ok=True)
+def download_and_save(dataset_name, config=None, save_dir="data"):
+    name = dataset_name if not config else f"{dataset_name}_{config}"
+    dataset_dir = os.path.join(save_dir, name)
+    if os.path.exists(dataset_dir):
+        print(f"Skipping {name}: already downloaded")
+        return
 
-    for task in tasks:
-        print(f"Downloading GLUE task: {task}")
-        dataset = load_dataset("glue", task)
-        task_dir = os.path.join(save_dir, task)
-        dataset.save_to_disk(task_dir)
-        print(f"Saved {task} to {task_dir}")
-
-def download_squad(save_dir="squad_data", version="v1"):
-    """
-    Download SQuAD dataset (v1 or v2).
-    """
-    os.makedirs(save_dir, exist_ok=True)
-    if version == "v1":
-        dataset_name = "squad"
-    elif version == "v2":
-        dataset_name = "squad_v2"
-    else:
-        raise ValueError("Invalid SQuAD version. Use 'v1' or 'v2'.")
-
-    print(f"Downloading SQuAD {version}...")
-    dataset = load_dataset(dataset_name)
-    dataset.save_to_disk(save_dir)
-    print(f"Saved SQuAD {version} to {save_dir}")
-
-def download_wikitext(save_dir="wikitext", version="wikitext-2"):
-    """
-    Download the WikiText language modeling datasets: wikitext-2 or wikitext-103
-    """
-    os.makedirs(save_dir, exist_ok=True)
-    print(f"Downloading {version}...")
-    dataset = load_dataset(version)
-    dataset.save_to_disk(os.path.join(save_dir, version))
-    print(f"Saved {version} to {os.path.join(save_dir, version)}")
+    print(f"Downloading {name}...")
+    dataset = load_dataset(dataset_name, config) if config else load_dataset(dataset_name)
+    dataset.save_to_disk(dataset_dir)
+    print(f"Saved {name} to {dataset_dir}")
 
 def main():
-    # Download GLUE tasks
-    download_glue_tasks()
+    os.makedirs("data", exist_ok=True)
 
-    # Download SQuAD v1
-    download_squad(version="v2")
+    # Language modeling
+    download_and_save("DKYoon/SlimPajama-6B")
 
-    # Download SQuAD v2 (optional, comment/uncomment as needed)
-    # download_squad(save_dir="squad_v2_data", version="v2")
+    # Multitask understanding
+    download_and_save("cais/mmlu")
 
-    # Download WikiText-2 (for language modeling)
-    download_wikitext(version="wikitext-2")
+    # QA
+    download_and_save("natural_questions")
+    download_and_save("mandarjoshi/trivia_qa")
 
-    # Download WikiText-103 (much larger, also for language modeling)
-    # download_wikitext(version="wikitext-103")
+    # Reasoning & NLI
+    download_and_save("facebook/anli")
+    download_and_save("hans")
+    download_and_save("allenai/ai2_arc", config="ARC-Challenge")
+    download_and_save("lukaemon/bbh")
+    download_and_save("gsm8k")
 
 if __name__ == "__main__":
     main()
