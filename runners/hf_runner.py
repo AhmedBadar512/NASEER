@@ -13,6 +13,9 @@ class HFModelRunner:
         self.max_length = max_length
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
         self.model = AutoModelForCausalLM.from_pretrained(model_name)
 
         self.dataset = load_from_disk(dataset_path)
