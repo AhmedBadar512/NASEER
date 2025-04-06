@@ -175,3 +175,4 @@ cython_debug/
 
 # Ignore directories inside the data folder (track only files)
 *_data/
+data/*/

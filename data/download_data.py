@@ -19,19 +19,35 @@ def main():
     # Language modeling
     download_and_save("DKYoon/SlimPajama-6B")
 
-    # Multitask understanding
-    download_and_save("cais/mmlu")
+    # MMLU selected subjects
+    mmlu_subjects = [
+        "philosophy",
+        "machine_learning",
+        "high_school_mathematics",
+        "us_foreign_policy"
+    ]
+    for subject in mmlu_subjects:
+        download_and_save("cais/mmlu", config=subject)
 
     # QA
     download_and_save("natural_questions")
-    download_and_save("mandarjoshi/trivia_qa")
+    download_and_save("mandarjoshi/trivia_qa", config="rc.wikipedia")
 
     # Reasoning & NLI
     download_and_save("facebook/anli")
     download_and_save("hans")
     download_and_save("allenai/ai2_arc", config="ARC-Challenge")
-    download_and_save("lukaemon/bbh")
-    download_and_save("gsm8k")
+
+    bbh_tasks = [
+        "boolean_expressions",
+        "multistep_arithmetic_two",
+        "logical_deduction_three_objects",
+        "web_of_lies"
+    ]
+    for task in bbh_tasks:
+        download_and_save("lukaemon/bbh", config=task)
+
+    download_and_save("gsm8k", config="main")
 
 if __name__ == "__main__":
     main()
