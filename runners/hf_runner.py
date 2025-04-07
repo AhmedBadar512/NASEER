@@ -5,7 +5,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingA
 from datasets import load_from_disk, concatenate_datasets, DatasetDict
 from tqdm import tqdm
 import re
-from time import time  # Add this import for timer functionality
+from time import time
+
+# TODO: For hans add entailment vs non-entailment accuracy
 
 class HFModelRunner:
     def __init__(self, model_name, dataset_path, output_dir="checkpoints", max_length=512, anli_round=None):
@@ -66,7 +68,6 @@ class HFModelRunner:
         elif "premise" in examples and "hypothesis" in examples:
             inputs = [f"Premise: {p}\nHypothesis: {h}\nAnswer:" for p, h in zip(examples["premise"], examples["hypothesis"])]
         elif "question" in examples and isinstance(examples["choices"], list) and isinstance(examples["choices"][0], list):
-            # MMLU-style: list of choices, answer is letter (A, B, C, D)
             inputs = []
             for question, choices in zip(examples["question"], examples["choices"]):
                 formatted = "\n".join([f"({chr(65+i)}) {choice}" for i, choice in enumerate(choices)])
@@ -85,8 +86,10 @@ class HFModelRunner:
             for q, choice_list in zip(examples["question"], examples["choices"]):
                 lettered = " ".join([f"({chr(65+i)}) {c}" for i, c in enumerate(choice_list)])
                 inputs.append(f"Q: {q}\nChoices: {lettered}\nAnswer: ")
+        elif "question" in examples and "answer" in examples:
+            inputs = [f"Q: {q}\nAnswer:" for q in examples["question"]]
         else:
-            raise KeyError("Unrecognized format: no 'text', 'premise+hypothesis', ARC, or MMLU fields.")
+            raise KeyError("Unrecognized format: no supported fields found.")
 
         tokenized = self.tokenizer(
             inputs,
@@ -132,18 +135,18 @@ class HFModelRunner:
         trainer.train()
 
     def eval(self, batch_size=8):
-        if "test" not in self.tokenized_dataset:
-            raise ValueError("The dataset does not contain a 'test' split for evaluation.")
+        print("Evaluating model on evaluation split...")
+        eval_split = self.tokenized_dataset.get("validation") or \
+                     self.tokenized_dataset.get("test") or \
+                     self.tokenized_dataset.get("dev")
 
-        print("Evaluating model on test set...")
-        test_dataset = self.tokenized_dataset["test"]
-        if hasattr(test_dataset, "to_dict"):
-            test_dataset = test_dataset.to_dict()
-        if isinstance(test_dataset, dict):
-            num_examples = len(test_dataset["input_ids"])
-            test_dataset = [{k: v[i] for k, v in test_dataset.items()} for i in range(num_examples)]
+        if hasattr(eval_split, "to_dict"):
+            eval_split = eval_split.to_dict()
+        if isinstance(eval_split, dict):
+            num_examples = len(eval_split["input_ids"])
+            eval_split = [{k: v[i] for k, v in eval_split.items()} for i in range(num_examples)]
 
-        batches = [test_dataset[i:i + batch_size] for i in range(0, len(test_dataset), batch_size)]
+        batches = [eval_split[i:i + batch_size] for i in range(0, len(eval_split), batch_size)]
 
         predictions = []
         references = []
@@ -187,7 +190,7 @@ class HFModelRunner:
             elif "answer" in example and isinstance(example["answer"], int):
                 reference = chr(65 + example["answer"])
             elif "label" in example and isinstance(example["label"], int):
-                reference = chr(65 + example["label"])
+                reference = str(example["label"])
             else:
                 reference = ""
 
@@ -196,13 +199,13 @@ class HFModelRunner:
         return {"predictions": predictions, "references": references}
 
     def _extract_answer_letter(self, text):
-        match = re.search(r"Answer\s*[:\-]?\s*([ABCD])", text, re.IGNORECASE)
+        match = re.search(r"Answer\s*[:\-]?\s*([ABCD01])", text, re.IGNORECASE)
         if match:
             return match.group(1).upper()
 
         for token in text.split():
             token = token.strip("():.").upper()
-            if token in ["A", "B", "C", "D"]:
+            if token in ["A", "B", "C", "D", "0", "1"]:
                 return token
 
         return ""
