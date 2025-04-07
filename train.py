@@ -18,7 +18,7 @@ def main():
         anli_round=args.anli_round  # Pass the ANLI round argument
     )
 
-    # runner.train(num_train_epochs=args.epochs, per_device_batch_size=args.batch_size)
+    runner.train(num_train_epochs=args.epochs, per_device_batch_size=args.batch_size)
     results = runner.eval()
 
     print("Evaluation Results:", results)
