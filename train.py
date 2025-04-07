@@ -7,12 +7,15 @@ def main():
     parser.add_argument("--dataset", type=str, required=True, help="Path to local dataset directory")
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--anli_round", type=str, choices=["r1", "r2", "r3"], default=None,
+                        help="Specify ANLI round (r1, r2, or r3). Default is sequential processing.")
     args = parser.parse_args()
 
     runner = HFModelRunner(
         model_name=args.model,
         dataset_path=args.dataset,
-        max_length=512  # Input context length
+        max_length=512,  # Input context length
+        anli_round=args.anli_round  # Pass the ANLI round argument
     )
 
     # runner.train(num_train_epochs=args.epochs, per_device_batch_size=args.batch_size)

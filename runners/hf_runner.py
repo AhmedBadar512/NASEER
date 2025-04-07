@@ -5,13 +5,15 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingA
 from datasets import load_from_disk, concatenate_datasets, DatasetDict
 from tqdm import tqdm
 import re
+from time import time  # Add this import for timer functionality
 
 class HFModelRunner:
-    def __init__(self, model_name, dataset_path, output_dir="checkpoints", max_length=512):
+    def __init__(self, model_name, dataset_path, output_dir="checkpoints", max_length=512, anli_round=None):
         self.model_name = model_name
         self.dataset_path = dataset_path
         self.output_dir = output_dir
         self.max_length = max_length
+        self.anli_round = anli_round
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
         self.tokenizer.padding_side = 'left'
@@ -23,7 +25,9 @@ class HFModelRunner:
         self.model.to(self.device)
 
         self.dataset = load_from_disk(dataset_path)
-        if any(k.startswith("train_") for k in self.dataset.keys()):
+        if "anli" in dataset_path.lower():
+            self._load_anli_dataset()
+        elif any(k.startswith("train_") for k in self.dataset.keys()):
             train_keys = [k for k in self.dataset.keys() if k.startswith("train")]
             eval_keys = [k for k in self.dataset.keys() if k.startswith("dev")]
             test_keys = [k for k in self.dataset.keys() if k.startswith("test")]
@@ -34,6 +38,27 @@ class HFModelRunner:
             })
 
         self.tokenized_dataset = self.dataset.map(self._tokenize, batched=True)
+
+    def _load_anli_dataset(self):
+        rounds = ["r1", "r2", "r3"]
+        if self.anli_round and self.anli_round in rounds:
+            print(f"Loading ANLI dataset for round: {self.anli_round}")
+            start_time = time()
+            self.dataset = DatasetDict({
+                "train": self.dataset[f"train_{self.anli_round}"],
+                "validation": self.dataset[f"dev_{self.anli_round}"],
+                "test": self.dataset[f"test_{self.anli_round}"]
+            })
+            print(f"Loaded ANLI round {self.anli_round} in {time() - start_time:.2f} seconds.")
+        else:
+            print("Loading ANLI dataset sequentially for rounds: r1, r2, r3")
+            start_time = time()
+            self.dataset = DatasetDict({
+                "train": concatenate_datasets([self.dataset[f"train_{r}"] for r in rounds]),
+                "validation": concatenate_datasets([self.dataset[f"dev_{r}"] for r in rounds]),
+                "test": concatenate_datasets([self.dataset[f"test_{r}"] for r in rounds])
+            })
+            print(f"Loaded ANLI sequentially in {time() - start_time:.2f} seconds.")
 
     def _tokenize(self, examples):
         if "text" in examples:
