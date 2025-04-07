@@ -12,10 +12,11 @@ def main():
     runner = HFModelRunner(
         model_name=args.model,
         dataset_path=args.dataset,
+        max_length=512  # Input context length
     )
 
-    runner.train(num_train_epochs=args.epochs, per_device_batch_size=args.batch_size)
-    results = runner.evaluate()
+    # runner.train(num_train_epochs=args.epochs, per_device_batch_size=args.batch_size)
+    results = runner.eval()
 
     print("Evaluation Results:", results)
 
