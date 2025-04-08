@@ -11,6 +11,7 @@ def main():
     parser.add_argument("--anli_round", type=str, choices=["r1", "r2", "r3"], default=None,
                         help="Specify ANLI round (r1, r2, or r3). Default is sequential processing.")
     parser.add_argument("--project_dir", type=str, default="/volumes2/checkpoints", help="Directory to save checkpoints")
+    parser.add_argument("--max_length", type=int, default=512, help="Maximum input length for the model")
     args = parser.parse_args()
 
     dst_dir = os.path.join(args.project_dir, args.model.split("/")[-1])
@@ -21,7 +22,7 @@ def main():
         model_name=args.model,
         dataset_path=args.dataset,
         output_dir=dst_dir,
-        max_length=512,  # Input context length
+        max_length=args.max_length,  # Input context length
         anli_round=args.anli_round  # Pass the ANLI round argument
     )
 
