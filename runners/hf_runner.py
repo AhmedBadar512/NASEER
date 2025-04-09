@@ -1,5 +1,3 @@
-# runners/hf_runner.py
-
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 from datasets import load_from_disk, concatenate_datasets, DatasetDict
@@ -27,6 +25,14 @@ class HFModelRunner:
         self.model.to(self.device)
 
         self.dataset = load_from_disk(dataset_path)
+        
+        # Check if this is TriviaQA dataset
+        first_key = next(iter(self.dataset.keys()))
+        if first_key in self.dataset and len(self.dataset[first_key]) > 0:
+            sample = self.dataset[first_key][0]
+            if "question" in sample and "question_id" in sample and "entity_pages" in sample:
+                print("Detected TriviaQA dataset format")
+        
         if "anli" in dataset_path.lower():
             self._load_anli_dataset()
         elif any(k.startswith("train_") for k in self.dataset.keys()):
@@ -63,7 +69,34 @@ class HFModelRunner:
             print(f"Loaded ANLI sequentially in {time() - start_time:.2f} seconds.")
 
     def _tokenize(self, examples):
-        if "text" in examples:
+        # Check for TriviaQA format
+        if "question" in examples and "question_id" in examples and "entity_pages" in examples:
+            # TriviaQA dataset
+            inputs = []
+            for question, entity_pages in zip(examples["question"], examples["entity_pages"]):
+                context = ""
+                # Extract context from entity_pages if available
+                if entity_pages and "wiki_context" in entity_pages and entity_pages["wiki_context"]:
+                    context = entity_pages["wiki_context"][0][:1000]  # Limit context size
+                
+                # Format the input as a QA prompt
+                prompt = f"Question: {question}\n"
+                if context:
+                    prompt += f"Context: {context}\n"
+                prompt += "Answer:"
+                inputs.append(prompt)
+        elif "question" in examples and "document" in examples and "annotations" in examples:
+            # Natural Questions dataset
+            inputs = []
+            for question, document in zip(examples["question"], examples["document"]):
+                # Create a prompt combining question and relevant document content
+                # Truncating document to avoid excessive length
+                doc_text = document.get('document_text', '')[:1000]  # Limit document size
+                inputs.append(f"Question: {question}\nContext: {doc_text}\nAnswer:")
+        elif "text" in examples and "meta" in examples and "__index_level_0__" in examples:
+            # Slim Pajama dataset
+            inputs = examples["text"]
+        elif "text" in examples:
             inputs = examples["text"]
         elif "premise" in examples and "hypothesis" in examples:
             inputs = [f"Premise: {p}\nHypothesis: {h}\nAnswer:" for p, h in zip(examples["premise"], examples["hypothesis"])]
@@ -99,7 +132,7 @@ class HFModelRunner:
         )
         tokenized["labels"] = tokenized["input_ids"].copy()
 
-        for field in ["answerKey", "answer", "label"]:
+        for field in ["answerKey", "answer", "label", "annotations"]:
             if field in examples:
                 tokenized[field] = examples[field]
 
@@ -180,21 +213,33 @@ class HFModelRunner:
 
         for i, example in enumerate(batch):
             full_output = self.tokenizer.decode(outputs[i], skip_special_tokens=True).strip()
-            prediction = self._extract_answer_letter(full_output)
-            predictions.append(prediction)
-
-            if "answerKey" in example:
-                reference = example["answerKey"].strip().upper()
-            elif "answer" in example and isinstance(example["answer"], str):
-                reference = example["answer"].strip().upper()
-            elif "answer" in example and isinstance(example["answer"], int):
-                reference = chr(65 + example["answer"])
-            elif "label" in example and isinstance(example["label"], int):
-                reference = str(example["label"])
+            
+            # Check if this is TriviaQA format
+            if "question_id" in example and "answer" in example and isinstance(example["answer"], dict):
+                # For TriviaQA, extract the full answer (not just a letter)
+                prediction = self._extract_triviaqa_answer(full_output)
+                # Normalize both prediction and reference for TriviaQA
+                prediction = prediction.strip().rstrip(".").lower()
+                reference = example["answer"].get("value", "").strip().rstrip(".").lower()
+                predictions.append(prediction)
+                references.append(reference)
             else:
-                reference = ""
+                # Handle other dataset formats as before
+                prediction = self._extract_answer_letter(full_output)
+                predictions.append(prediction)
+                
+                if "answerKey" in example:
+                    reference = example["answerKey"].strip().upper()
+                elif "answer" in example and isinstance(example["answer"], str):
+                    reference = example["answer"].strip().upper()
+                elif "answer" in example and isinstance(example["answer"], int):
+                    reference = chr(65 + example["answer"])
+                elif "label" in example and isinstance(example["label"], int):
+                    reference = str(example["label"])
+                else:
+                    reference = ""
 
-            references.append(reference)
+                references.append(reference)
 
         return {"predictions": predictions, "references": references}
 
@@ -209,3 +254,20 @@ class HFModelRunner:
                 return token
 
         return ""
+
+    def _extract_triviaqa_answer(self, text):
+        """Extract answer from model output for TriviaQA format with normalization."""
+        answer_match = re.search(r"Answer\s*:(.+)", text, re.IGNORECASE)
+        if answer_match:
+            ans = answer_match.group(1).strip()
+            # Take only the first line if there is extra text
+            ans = ans.split("\n")[0].strip()
+            # Remove any trailing period
+            ans = ans.rstrip(".")
+            return ans
+        # If no "Answer:" pattern, return the last sentence or phrase
+        sentences = text.split(".")
+        if sentences:
+            ans = sentences[-1].strip().rstrip(".")
+            return ans
+        return text.strip()
