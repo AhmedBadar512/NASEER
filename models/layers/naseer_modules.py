@@ -107,10 +107,10 @@ class NASEERLayer(nn.Module):
 
 # Example usage
 if __name__ == "__main__":
-    hidden_size = 256
+    hidden_size = 512
     num_heads = 8
     top_k = 8
-    batch_size = 8
+    batch_size = 16
     seq_length = 16
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
