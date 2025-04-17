@@ -20,7 +20,9 @@ class NASEERAttentionAdapter(nn.Module):
 def load_naseer_gpt_neo(pretrained_model="EleutherAI/gpt-neo-125M",
                         entangle_method='gated',
                         top_k=None,
-                        rank=8):
+                        rank=8,
+                        hidden_size=None,
+                        num_heads=None):
     """
     Load GPT‑Neo‑125M and replace each block.attn with a NASEERLayer of matching size.
     """
@@ -28,15 +30,15 @@ def load_naseer_gpt_neo(pretrained_model="EleutherAI/gpt-neo-125M",
     config = GPTNeoConfig.from_pretrained(pretrained_model)
     model = GPTNeoForCausalLM.from_pretrained(pretrained_model, config=config)
 
-    hidden_size = config.hidden_size
-    num_heads = config.num_attention_heads
+    eff_hidden_size = hidden_size or config.hidden_size
+    eff_num_heads = num_heads or config.num_attention_heads
 
     # Swap out attention modules
     for block in model.transformer.h:
         block.attn = NASEERAttentionAdapter(
             NASEERLayer(
-                hidden_size=hidden_size,
-                num_heads=num_heads,
+                hidden_size=eff_hidden_size,
+                num_heads=eff_num_heads,
                 top_k=top_k,
                 entangle_method=entangle_method,
                 rank=rank

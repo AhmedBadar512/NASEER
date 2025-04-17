@@ -1,26 +1,50 @@
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
+from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments, TrainerCallback
 from datasets import load_from_disk, concatenate_datasets, DatasetDict
 from tqdm import tqdm
 import re
 from time import time
+import os
 
 # TODO: For hans add entailment vs non-entailment accuracy
 
 class HFModelRunner:
-    def __init__(self, model_name, dataset_path, output_dir="checkpoints", max_length=512, anli_round=None):
+    def __init__(self,
+                 model_name, dataset_path,
+                 output_dir="checkpoints", max_length=512, anli_round=None,
+                 use_naseer=False, entangle_method='gated',
+                 top_k=None, rank=8,
+                 layer_hidden_size=None, layer_num_heads=None):
         self.model_name = model_name
         self.dataset_path = dataset_path
         self.output_dir = output_dir
         self.max_length = max_length
         self.anli_round = anli_round
+        self.use_naseer = use_naseer
+        self.entangle_method = entangle_method
+        self.top_k = top_k
+        self.rank = rank
+        self.layer_hidden_size = layer_hidden_size
+        self.layer_num_heads = layer_num_heads
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
         self.tokenizer.padding_side = 'left'
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        self.model = AutoModelForCausalLM.from_pretrained(model_name)
+        if self.use_naseer:
+            from models.gpt_neo_naseer import load_naseer_gpt_neo
+            self.model = load_naseer_gpt_neo(
+                pretrained_model=model_name,
+                entangle_method=self.entangle_method,
+                top_k=self.top_k,
+                rank=self.rank,
+                hidden_size=self.layer_hidden_size,
+                num_heads=self.layer_num_heads
+            )
+        else:
+            self.model = AutoModelForCausalLM.from_pretrained(model_name)
+
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model.to(self.device)
 
@@ -138,7 +162,18 @@ class HFModelRunner:
 
         return tokenized
 
-    def train(self, num_train_epochs=1, per_device_batch_size=4):
+    def train(self,
+              num_train_epochs=1,
+              per_device_batch_size=4,
+              report_to=None,
+              save_every_n_epochs=None,
+              logging_dir=None,
+              learning_rate=None,
+              lr_scheduler_type=None,
+              warmup_steps=0):
+        # prepare logging dir
+        logging_dir = logging_dir or os.path.join(self.output_dir, "logs")
+
         args = TrainingArguments(
             output_dir=self.output_dir,
             per_device_train_batch_size=per_device_batch_size,
@@ -146,26 +181,46 @@ class HFModelRunner:
             num_train_epochs=num_train_epochs,
             evaluation_strategy="epoch",
             save_strategy="epoch",
-            logging_dir="./logs",
+            logging_dir=logging_dir,
             logging_steps=10,
+            report_to=report_to or ["tensorboard"],
+            learning_rate=learning_rate or 5e-5,
+            lr_scheduler_type=lr_scheduler_type,
+            warmup_steps=warmup_steps,
+            # keep default save limit or adjust here
         )
+
+        # build optional save-every-N-epochs callback
+        callbacks = []
+        if save_every_n_epochs and save_every_n_epochs > 0:
+            class SaveEveryNEpochsCallback(TrainerCallback):
+                def __init__(self, n, out_dir):
+                    self.n = n; self.out_dir = out_dir
+                def on_epoch_end(self, args, state, control, **kwargs):
+                    epoch = int(state.epoch or 0)
+                    if epoch and epoch % self.n == 0:
+                        ckpt = os.path.join(self.out_dir, f"checkpoint-epoch-{epoch}")
+                        kwargs["model"].save_pretrained(ckpt)
+            callbacks.append(SaveEveryNEpochsCallback(save_every_n_epochs, self.output_dir))
 
         train_split = self.tokenized_dataset.get("train") or \
                       self.tokenized_dataset.get("dev") or \
                       next(iter(self.tokenized_dataset.values()))
-
-        eval_split = self.tokenized_dataset.get("validation") or \
-                     self.tokenized_dataset.get("test") or \
-                     self.tokenized_dataset.get("dev")
+        eval_split  = self.tokenized_dataset.get("validation") or \
+                      self.tokenized_dataset.get("test") or \
+                      self.tokenized_dataset.get("dev")
 
         trainer = Trainer(
             model=self.model,
             args=args,
             train_dataset=train_split,
             eval_dataset=eval_split,
+            callbacks=callbacks or None,
         )
 
-        trainer.train()
+        # run training and return metrics
+        train_output = trainer.train()
+        return train_output.metrics
 
     def eval(self, batch_size=8):
         print("Evaluating model on evaluation split...")
@@ -200,14 +255,17 @@ class HFModelRunner:
         predictions = []
         references = []
 
-        input_ids = torch.tensor([example["input_ids"] for example in batch]).to(self.device)
+        # build torch tensors from the list-of-dicts
+        input_ids = torch.tensor([ex["input_ids"] for ex in batch]).to(self.device)
         attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
 
         with torch.no_grad():
             outputs = self.model.generate(
-                input_ids,
+                input_ids=input_ids,
                 attention_mask=attention_mask,
-                max_new_tokens=50,
+                max_length=self.max_length,
+                use_cache=not self.use_naseer,
+                num_beams=self.eval_beams if hasattr(self, "eval_beams") else None,
                 pad_token_id=self.tokenizer.eos_token_id,
             )
 

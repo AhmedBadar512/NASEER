@@ -177,5 +177,6 @@ cython_debug/
 *_data/
 data/*/
 
-checkpoints/
+checkpoints*/
 test.py
+.vscode/launch.json
